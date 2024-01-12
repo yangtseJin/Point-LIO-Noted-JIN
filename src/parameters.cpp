@@ -41,9 +41,9 @@ void readParameters(ros::NodeHandle &nh)
   nh.param<double>("mapping/satu_gyro",satu_gyro,35.0);
   nh.param<double>("mapping/acc_norm",acc_norm,1.0);
   nh.param<float>("mapping/plane_thr", plane_thr, 0.05f);
-  nh.param<int>("point_filter_num", p_pre->point_filter_num, 2);
-  nh.param<std::string>("common/lid_topic",lid_topic,"/livox/lidar");
-  nh.param<std::string>("common/imu_topic", imu_topic,"/livox/imu");
+  nh.param<int>("point_filter_num", p_pre->point_filter_num, 2);     // 采样间隔，即每隔point_filter_num个点取1个点
+  nh.param<std::string>("common/lid_topic",lid_topic,"/livox/lidar");   // 雷达点云topic名称
+  nh.param<std::string>("common/imu_topic", imu_topic,"/livox/imu");    // IMU的topic名称
   nh.param<bool>("common/con_frame",con_frame,false);
   nh.param<int>("common/con_frame_num",con_frame_num,1);
   nh.param<bool>("common/cut_frame",cut_frame,false);
@@ -69,22 +69,23 @@ void readParameters(ros::NodeHandle &nh)
   nh.param<double>("mapping/imu_meas_acc_cov",imu_meas_acc_cov,0.1);
   nh.param<double>("mapping/imu_meas_omg_cov",imu_meas_omg_cov,0.1);
   nh.param<double>("preprocess/blind", p_pre->blind, 1.0);
-  nh.param<int>("preprocess/lidar_type", lidar_type, 1);
-  nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 16);
+  nh.param<int>("preprocess/lidar_type", lidar_type, 1);        // 激光雷达的类型
+  nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 16);    // 激光雷达扫描的线数（livox avia为6线）
   nh.param<int>("preprocess/scan_rate", p_pre->SCAN_RATE, 10);
   nh.param<int>("preprocess/timestamp_unit", p_pre->time_unit, 1);
   nh.param<double>("mapping/match_s", match_s, 81);
-  nh.param<bool>("mapping/gravity_align", gravity_align, true);
-  nh.param<std::vector<double>>("mapping/gravity", gravity, std::vector<double>());
+  nh.param<bool>("mapping/gravity_align", gravity_align, true);     // 是否将世界坐标系的z轴与重力方向对齐
+  nh.param<std::vector<double>>("mapping/gravity", gravity, std::vector<double>());     // 重力方向为 [0.0, 0.0, -9.810]
   nh.param<std::vector<double>>("mapping/gravity_init", gravity_init, std::vector<double>());
-  nh.param<std::vector<double>>("mapping/extrinsic_T", extrinT, std::vector<double>());
-  nh.param<std::vector<double>>("mapping/extrinsic_R", extrinR, std::vector<double>());
+  nh.param<std::vector<double>>("mapping/extrinsic_T", extrinT, std::vector<double>());     // 雷达相对于IMU的外参T（即雷达在IMU坐标系中的坐标）
+  nh.param<std::vector<double>>("mapping/extrinsic_R", extrinR, std::vector<double>());     // 雷达相对于IMU的外参R
   nh.param<bool>("odometry/publish_odometry_without_downsample", publish_odometry_without_downsample, false);
   nh.param<bool>("publish/path_en",path_en, true);
-  nh.param<bool>("publish/scan_publish_en",scan_pub_en,1);
-  nh.param<bool>("publish/scan_bodyframe_pub_en",scan_body_pub_en,1);
+  nh.param<bool>("publish/scan_publish_en",scan_pub_en,1);              // 是否发布当前正在扫描的点云的topic
+  nh.param<bool>("publish/scan_bodyframe_pub_en",scan_body_pub_en,1);   // 是否发布经过运动畸变校正注册到IMU坐标系的点云的topic
   nh.param<bool>("runtime_pos_log_enable", runtime_pos_log, 0);
-  nh.param<bool>("pcd_save/pcd_save_en", pcd_save_en, false);
-  nh.param<int>("pcd_save/interval", pcd_save_interval, -1);
+  nh.param<bool>("pcd_save/pcd_save_en", pcd_save_en, false);       // 是否将点云地图保存到PCD文件
+  nh.param<int>("pcd_save/interval", pcd_save_interval, -1);        // 每个pcd文件中保存了多少个LiDAR帧；
+                                                                                            // -1：所有帧都将保存在一个pcd文件中，当帧太多时可能会导致内存崩溃。
 }
 

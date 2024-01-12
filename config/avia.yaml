@@ -44,7 +44,7 @@ mapping:
                    0, 0, 1 ]
 
 odometry: 
-    publish_odometry_without_downsample: false
+    publish_odometry_without_downsample: true   # 开关高频里程计
 
 publish:
     path_en: true                 # false: close the path output

@@ -415,6 +415,7 @@ void h_model_IMU_output(state_output &s, esekfom::dyn_share_modified<double> &ek
 	}
 }
 
+// 把点从body系转到world系
 void pointBodyToWorld(PointType const * const pi, PointType * const po)
 {    
     V3D p_body(pi->x, pi->y, pi->z);
