@@ -38,7 +38,10 @@ condition_variable sig_buffer;
 
 string root_dir = ROOT_DIR;
 
-int feats_down_size = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
+int feats_down_size = 0,    // 下采样的点数
+    time_log_counter = 0,   // 时间log计数器
+    scan_count = 0,         // scan_count：接收到的激光雷达Msg的总数
+    publish_count = 0;      // publish_count：接收到的IMU的Msg的总数
 
 int frame_ct = 0;
 double time_update_last = 0.0, time_current = 0.0, time_predict_last_const = 0.0, t_last = 0.0;
@@ -50,7 +53,7 @@ PointCloudXYZI::Ptr  ptr_con(new PointCloudXYZI());
 // Time Log Variables
 double T1[MAXN], s_plot[MAXN], s_plot2[MAXN], s_plot3[MAXN], s_plot11[MAXN];
 double match_time = 0, solve_time = 0, propag_time = 0, update_time = 0;
-
+// lidar_pushed：用于判断激光雷达数据是否从缓存队列中拿到meas中的数据
 bool   lidar_pushed = false, flg_reset = false, flg_exit = false;
 
 vector<BoxPointType> cub_needrm;    // ikd-tree中，地图需要移除的包围盒序列
@@ -62,8 +65,8 @@ deque<sensor_msgs::Imu::ConstPtr> imu_deque;    // IMU数据缓存队列
 //surf feature in map
 //一些点云变量
 PointCloudXYZI::Ptr feats_undistort(new PointCloudXYZI());          //去畸变的特征
-PointCloudXYZI::Ptr feats_down_body_space(new PointCloudXYZI());    //畸变纠正后降采样的单帧点云，lidar系
-PointCloudXYZI::Ptr init_feats_world(new PointCloudXYZI());         //畸变纠正后降采样的单帧点云，w系
+PointCloudXYZI::Ptr feats_down_body_space(new PointCloudXYZI());
+PointCloudXYZI::Ptr init_feats_world(new PointCloudXYZI());
 
 //下采样的体素点云
 pcl::VoxelGrid<PointType> downSizeFilterSurf;      // 单帧内降采样使用voxel grid
@@ -126,6 +129,7 @@ inline void dump_lio_state_to_log(FILE *fp)
     fflush(fp);
 }
 
+// 点云从Lidar系转到IMU系
 void pointBodyLidarToIMU(PointType const * const pi, PointType * const po)
 {
     V3D p_body_lidar(pi->x, pi->y, pi->z);
@@ -165,22 +169,27 @@ void points_cache_collect() // seems for debug
 // ikd-tree地图立方体的2个角点
 BoxPointType LocalMap_Points;       // ikd-tree中,局部地图的包围盒角点
 bool Localmap_Initialized = false;  // 局部地图是否初始化
-void lasermap_fov_segment()
+void lasermap_fov_segment() // 针对激光雷达视场角来完成图像分割
 {
+    // 将容量设置为容器的长度
     cub_needrm.shrink_to_fit(); // 释放需要移除的区域的内存，不会改变 vector 中的元素数量，只会影响其内部的容量
 
     V3D pos_LiD;
     if (use_imu_as_input)   // use_imu_as_input 默认为true
     {
-        pos_LiD = kf_input.x_.pos + kf_input.x_.rot * Lidar_T_wrt_IMU;  // 雷达在W系下位置，式子的意义是 W^p_L = W^p_I + W^R_I * I^t_L
+        // 计算激光雷达在当前位姿下的位置
+        // 雷达在W系下位置，式子的意义是 W^p_L = W^p_I + W^R_I * I^t_L
+        pos_LiD = kf_input.x_.pos + kf_input.x_.rot * Lidar_T_wrt_IMU;
     }
     else
     {
         pos_LiD = kf_output.x_.pos + kf_output.x_.rot * Lidar_T_wrt_IMU;
     }
+    // 判断是否需要初始化局部地图
     // 初始化局部地图范围，以pos_LiD为中心,长宽高均为cube_len
     // 初始化局部地图包围盒角点，以为w系下lidar位置为中心,得到长宽高200*200*200的局部地图
     if (!Localmap_Initialized){
+        // 将局部地图的边界设置为当前位置的正方形区域，并将Localmap_Initialized设置为true
         // 系统起始需要初始化局部地图的大小和位置
         for (int i = 0; i < 3; i++){
             LocalMap_Points.vertex_min[i] = pos_LiD(i) - cube_len / 2.0;
@@ -193,6 +202,7 @@ void lasermap_fov_segment()
     // 各个方向上Lidar与局部地图边界的距离，或者说是lidar与立方体盒子六个面的距离
     float dist_to_map_edge[3][2];
     bool need_move = false;
+    // 如果不需要初始化，则计算激光雷达当前位姿与局部地图边界的距离，并根据移动阈值判断是否需要移动局部地图
     // 当前雷达系中心到各个地图边缘的距离
     for (int i = 0; i < 3; i++){
         dist_to_map_edge[i][0] = fabs(pos_LiD(i) - LocalMap_Points.vertex_min[i]);
@@ -202,6 +212,7 @@ void lasermap_fov_segment()
     }
     if (!need_move) return;     //如果不需要挪动，直接返回，不更改局部地图
     // 否则需要计算移动的距离
+    // 如果需要移动，则计算新的局部地图边界
     BoxPointType New_LocalMap_Points, tmp_boxpoints;
     // 新的局部地图盒子边界点
     New_LocalMap_Points = LocalMap_Points;
@@ -214,6 +225,7 @@ void lasermap_fov_segment()
             New_LocalMap_Points.vertex_max[i] -= mov_dist;
             New_LocalMap_Points.vertex_min[i] -= mov_dist;
             tmp_boxpoints.vertex_min[i] = LocalMap_Points.vertex_max[i] - mov_dist;
+            // 将需要移除的框添加到cub_needrm中
             cub_needrm.emplace_back(tmp_boxpoints);     // 移除较远包围盒
         } else if (dist_to_map_edge[i][1] <= MOV_THRESHOLD * DET_RANGE){
             New_LocalMap_Points.vertex_max[i] += mov_dist;
@@ -225,6 +237,7 @@ void lasermap_fov_segment()
     LocalMap_Points = New_LocalMap_Points;
 
     points_cache_collect();
+    // 收集点云缓存，并根据cub_needrm中的框删除点云，返回删除的框数量。
     // 使用Boxs删除指定盒内的点
     if(cub_needrm.size() > 0) int kdtree_delete_counter = ikdtree.Delete_Point_Boxes(cub_needrm);
 }
@@ -496,6 +509,8 @@ bool sync_packages(MeasureGroup &meas)
         return false;
     }
     /*** push imu data, and pop from imu buffer ***/
+    // 压入imu数据，并从imu缓冲区弹出
+    // Process() 函数中 IMU 初始化完成后，imu_need_init_置为false，这里就不会执行
     if (p_imu->imu_need_init_)
     {
         // 压入imu数据，并从imu缓冲区弹出
@@ -515,7 +530,7 @@ bool sync_packages(MeasureGroup &meas)
             imu_deque.pop_front();
         }
     }
-    else if(!init_map)
+    else if(!init_map)  // init_map 初始为 false，在 ikd-tree 构建好之后被置为 true
     {
         double imu_time = imu_deque.front()->header.stamp.toSec();
         meas.imu.shrink_to_fit();
@@ -540,46 +555,60 @@ bool sync_packages(MeasureGroup &meas)
 }
 
 int process_increments = 0;
-void map_incremental()
+//根据最新估计位姿  增量添加点云到map
+void map_incremental()  //地图的增量更新，主要完成对ikd-tree的地图建立
 {
-    PointVector PointToAdd;
-    PointVector PointNoNeedDownsample;
-    PointToAdd.reserve(feats_down_size);
-    PointNoNeedDownsample.reserve(feats_down_size);
-    
-        for(int i = 0; i < feats_down_size; i++)
-        {            
-            if (!Nearest_Points[i].empty())
+    PointVector PointToAdd;     // 需要加入到ikd-tree中的点云
+    PointVector PointNoNeedDownsample;      //加入ikd-tree时，不需要降采样的点云
+    PointToAdd.reserve(feats_down_size);    //构建的地图点
+    PointNoNeedDownsample.reserve(feats_down_size); //构建的地图点，不需要降采样的点云
+    //根据点与所在包围盒中心点的距离，分类是否需要降采样
+    for (int i = 0; i < feats_down_size; i++)
+    {
+        // 判断是否有关键点需要加到地图中
+        if (!Nearest_Points[i].empty())
         {
-            const PointVector &points_near = Nearest_Points[i];
-            bool need_add = true;
-            PointType downsample_result, mid_point; 
-            mid_point.x = floor(feats_down_world->points[i].x/filter_size_map_min)*filter_size_map_min + 0.5 * filter_size_map_min;
-            mid_point.y = floor(feats_down_world->points[i].y/filter_size_map_min)*filter_size_map_min + 0.5 * filter_size_map_min;
-            mid_point.z = floor(feats_down_world->points[i].z/filter_size_map_min)*filter_size_map_min + 0.5 * filter_size_map_min;
-                /* If the nearest points is definitely outside the downsample box */
-                if (fabs(points_near[0].x - mid_point.x) > 0.866 * filter_size_map_min || fabs(points_near[0].y - mid_point.y) > 0.866 * filter_size_map_min || fabs(points_near[0].z - mid_point.z) > 0.866 * filter_size_map_min){
-                    PointNoNeedDownsample.emplace_back(feats_down_world->points[i]);
+            const PointVector &points_near = Nearest_Points[i];     //获取附近的点云
+            bool need_add = true;    //是否需要加入到地图中
+            PointType downsample_result, //降采样结果
+                        mid_point;  //点所在体素的中心
+            // filter_size_map_min是地图体素降采样的栅格边长，设为0.5m
+            // mid_point即为该特征点所属的栅格的中心点坐标
+            mid_point.x = floor(feats_down_world->points[i].x / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
+            mid_point.y = floor(feats_down_world->points[i].y / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
+            mid_point.z = floor(feats_down_world->points[i].z / filter_size_map_min) * filter_size_map_min + 0.5 * filter_size_map_min;
+            /* If the nearest points is definitely outside the downsample box */
+            //判断最近点在x、y、z三个方向上，与中心的距离，判断是否加入时需要降采样
+            //如果距离最近的点都在体素外，则该点不需要Downsample
+            if (fabs(points_near[0].x - mid_point.x) > 0.866 * filter_size_map_min ||
+                fabs(points_near[0].y - mid_point.y) > 0.866 * filter_size_map_min ||
+                fabs(points_near[0].z - mid_point.z) > 0.866 * filter_size_map_min) {
+                // 若三个方向距离有一个大于地图栅格0.866倍长，无需降采样
+                PointNoNeedDownsample.emplace_back(feats_down_world->points[i]);
                 continue;
             }
-                /* Check if there is a point already in the downsample box */
-                float dist  = calc_dist<float>(feats_down_world->points[i],mid_point);
-                for (int readd_i = 0; readd_i < points_near.size(); readd_i ++)
-            {
-                    /* Those points which are outside the downsample box should not be considered. */
-                    if (fabs(points_near[readd_i].x - mid_point.x) < 0.5 * filter_size_map_min && fabs(points_near[readd_i].y - mid_point.y) < 0.5 * filter_size_map_min && fabs(points_near[readd_i].z - mid_point.z) < 0.5 * filter_size_map_min) {
+            /* Check if there is a point already in the downsample box */
+            float dist = calc_dist<float>(feats_down_world->points[i], mid_point);
+            // 判断当前点的 NUM_MATCH_POINTS 个邻近点与包围盒中心的范围
+            for (int readd_i = 0; readd_i < points_near.size(); readd_i++) {
+                /* Those points which are outside the downsample box should not be considered. */
+                // 若三个方向距离都小于地图栅格半轴长，就不添加该点
+                if (fabs(points_near[readd_i].x - mid_point.x) < 0.5 * filter_size_map_min &&
+                    fabs(points_near[readd_i].y - mid_point.y) < 0.5 * filter_size_map_min &&
+                    fabs(points_near[readd_i].z - mid_point.z) < 0.5 * filter_size_map_min) {
                     need_add = false;
                     break;
                 }
             }
-                if (need_add) PointToAdd.emplace_back(feats_down_world->points[i]);
+            //加入到PointToAdd中
+            if (need_add) PointToAdd.emplace_back(feats_down_world->points[i]);
         }
-        else
+        else //如果周围没有点，则加入到 PointNoNeedDownsample 中
         {
-                // PointToAdd.emplace_back(feats_down_world->points[i]);
-                PointNoNeedDownsample.emplace_back(feats_down_world->points[i]);
+            // PointToAdd.emplace_back(feats_down_world->points[i]);
+            PointNoNeedDownsample.emplace_back(feats_down_world->points[i]);
         }
-        }
+    }
     int add_point_size = ikdtree.Add_Points(PointToAdd, true);
     ikdtree.Add_Points(PointNoNeedDownsample, false);
 }
@@ -602,15 +631,16 @@ void publish_init_kdtree(const ros::Publisher & pubLaserCloudFullRes)
 
 }
 
-PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI(500000, 1));
-PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
+PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI(500000, 1));    //创建一个点云用于存储等待发布的点云
+PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());     //创建一个点云用于存储等待保存的点云
 void publish_frame_world(const ros::Publisher & pubLaserCloudFullRes)
 {
-    if (scan_pub_en)
+    if (scan_pub_en)    // 设置是否发布激光雷达数据
     {
-        PointCloudXYZI::Ptr laserCloudFullRes(feats_down_body);
+        PointCloudXYZI::Ptr laserCloudFullRes(feats_down_body);     // 降采样后的body系下的点云
         int size = laserCloudFullRes->points.size();
 
+        //创建一个点云用于存储转换到世界坐标系的点云
         PointCloudXYZI::Ptr   laserCloudWorld(new PointCloudXYZI(size, 1));
         
         for (int i = 0; i < size; i++)
@@ -631,7 +661,8 @@ void publish_frame_world(const ros::Publisher & pubLaserCloudFullRes)
         pubLaserCloudFullRes.publish(laserCloudmsg);
         publish_count -= PUBFRAME_PERIOD;
     }
-    
+
+    //把结果压入到pcd中
     /**************** save map ****************/
     /* 1. make sure you have enough memories
     /* 2. noted that pcd save will influence the real-time performences **/
@@ -648,10 +679,11 @@ void publish_frame_world(const ros::Publisher & pubLaserCloudFullRes)
             laserCloudWorld->points[i].intensity = feats_down_world->points[i].intensity;
         }
         
-        *pcl_wait_save += *laserCloudWorld;
+        *pcl_wait_save += *laserCloudWorld;     // 把结果压入到pcd中
 
         static int scan_wait_num = 0;
         scan_wait_num ++;
+        // pcd_save_interval 默认是 -1，即表示保存整张点云地图，不分割，下面的保存代码就不执行
         if (pcl_wait_save->size() > 0 && pcd_save_interval > 0  && scan_wait_num >= pcd_save_interval)
         {
             pcd_index ++;
@@ -665,13 +697,16 @@ void publish_frame_world(const ros::Publisher & pubLaserCloudFullRes)
     }
 }
 
+// 把去畸变的雷达系下的点云转到IMU系
 void publish_frame_body(const ros::Publisher & pubLaserCloudFull_body)
 {
     int size = feats_undistort->points.size();
+    //创建一个点云用于存储转换到IMU系的点云
     PointCloudXYZI::Ptr laserCloudIMUBody(new PointCloudXYZI(size, 1));
 
     for (int i = 0; i < size; i++)
     {
+        //转换到IMU坐标系
         pointBodyLidarToIMU(&feats_undistort->points[i], \
                             &laserCloudIMUBody->points[i]);
     }
@@ -698,7 +733,7 @@ void set_posestamp(T & out)
         out.orientation.z = q.coeffs()[2];
         out.orientation.w = q.coeffs()[3];
     }
-    else
+    else    // use_imu_as_input 默认是1 ，执行这里的else
     {
         out.position.x = kf_input.x_.pos(0);
         out.position.y = kf_input.x_.pos(1);
@@ -800,7 +835,10 @@ int main(int argc, char** argv)
     p_imu->lidar_type = p_pre->lidar_type = lidar_type;
     p_imu->imu_en = imu_en;
 
+    // 将函数地址传入kf对象中，用于接收特定于系统的模型及其差异。
+    // kf_input 中的f()函数就变为了 get_f_input() 函数 ，线性化的系数矩阵 f_x()函数就变为了 df_dx_input() 函数，计算特征点残差的函数变为了 h_model_input
     kf_input.init_dyn_share_modified(get_f_input, df_dx_input, h_model_input);
+    // kf_output 中的f()函数就变为了 get_f_output() 函数，线性化的系数矩阵 f_x()函数就变为了 df_dx_output() 函数，计算特征点残差的函数变为了 h_model_output 和 h_model_IMU_output
     kf_output.init_dyn_share_modified_2h(get_f_output, df_dx_output, h_model_output, h_model_IMU_output);
     Eigen::Matrix<double, 24, 24> P_init = MD(24,24)::Identity() * 0.01;
     P_init.block<3, 3>(21, 21) = MD(3,3)::Identity() * 0.0001;
@@ -813,8 +851,8 @@ int main(int argc, char** argv)
     P_init_output.block<6, 6>(24, 24) = MD(6,6)::Identity() * 0.001;
     kf_input.change_P(P_init);
     kf_output.change_P(P_init_output);
-    Eigen::Matrix<double, 24, 24> Q_input = process_noise_cov_input();
-    Eigen::Matrix<double, 30, 30> Q_output = process_noise_cov_output();
+    Eigen::Matrix<double, 24, 24> Q_input = process_noise_cov_input();      // 输入的协方差矩阵
+    Eigen::Matrix<double, 30, 30> Q_output = process_noise_cov_output();    // 输出的协方差矩阵
     /*** debug record ***/
     FILE *fp;
     string pos_log_dir = root_dir + "/Log/pos_log.txt";
@@ -971,10 +1009,12 @@ int main(int argc, char** argv)
             /*** downsample the feature points in a scan ***/
             // 点云下采样
             t1 = omp_get_wtime();       // 记录时间
+            // 空间下采样
             if(space_down_sample)   // space_down_sample 默认为true
             {
-                downSizeFilterSurf.setInputCloud(feats_undistort);      //获得去畸变后的点云数据
-                downSizeFilterSurf.filter(*feats_down_body);        // 滤波降采样后的点云数据
+                downSizeFilterSurf.setInputCloud(feats_undistort);      // 获得去畸变后的点云数据作为输入
+                downSizeFilterSurf.filter(*feats_down_body);        // 滤波降采样后的点云数据作为输出
+                // 按时间排序
                 // 将一次扫描中的点按时间从小到大排序
                 sort(feats_down_body->points.begin(), feats_down_body->points.end(), time_list); 
             }
@@ -983,12 +1023,12 @@ int main(int argc, char** argv)
                 feats_down_body = Measures.lidar;
                 sort(feats_down_body->points.begin(), feats_down_body->points.end(), time_list); 
             }
-            time_seq = time_compressing<int>(feats_down_body);
+            time_seq = time_compressing<int>(feats_down_body);  //时间压缩
             feats_down_size = feats_down_body->points.size();   // 记录滤波后的点云数量
             
             /*** initialize the map kdtree ***/
             // 构建kd树
-            if(!init_map)
+            if(!init_map)   // init_map 初始为 false
             {
                 // 初始化ikdtree(ikdtree为空时)
                 if(ikdtree.Root_Node == nullptr) //
@@ -997,7 +1037,8 @@ int main(int argc, char** argv)
                     // 设置ikd tree的降采样参数
                     ikdtree.set_downsample_param(filter_size_map_min);
                 }
-                    
+
+                //初始化点云
                 feats_down_world->resize(feats_down_size);  // 将下采样得到的地图点大小设为与body系大小一致
                 for(int i = 0; i < feats_down_size; i++)
                 {
@@ -1005,13 +1046,16 @@ int main(int argc, char** argv)
                     pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
                 }
                 for (size_t i = 0; i < feats_down_world->size(); i++) {
+                //将转换到世界坐标西的点云加入到init_feats_world
                 init_feats_world->points.emplace_back(feats_down_world->points[i]);}
+                //等待构建地图
                 if(init_feats_world->size() < init_map_size) continue;
+                // 构建地图
                 // 根据世界坐标系下的点构建ikdtree
                 ikdtree.Build(init_feats_world->points); 
                 init_map = true;
                 publish_init_kdtree(pubLaserCloudMap); //(pubLaserCloudFullRes);
-                continue;
+                continue;   // 构建完ikdtree后continue进入下一次循环
             }        
             /*** ICP and Kalman filter update ***/
             // ICP和迭代卡尔曼滤波更新
@@ -1020,13 +1064,14 @@ int main(int argc, char** argv)
 
             Nearest_Points.resize(feats_down_size);     // 存储近邻点的vector，将降采样处理后的点云用于搜索最近点
 
-            t2 = omp_get_wtime();
+            t2 = omp_get_wtime();   // 初始化t2为当前时间
             
             /*** iterated state estimation ***/
             crossmat_list.reserve(feats_down_size);
             pbody_list.reserve(feats_down_size);
             // pbody_ext_list.reserve(feats_down_size);
-                          
+
+            // 对于每个点，将其坐标转换为V3D类型的point_this
             for (size_t i = 0; i < feats_down_body->size(); i++)
             {
                 V3D point_this(feats_down_body->points[i].x,
@@ -1038,6 +1083,7 @@ int main(int argc, char** argv)
                 {
                     if (!use_imu_as_input)
                     {
+                        // 对于每个点，使用卡尔曼滤波估计出的外参对其进行坐标变换
                         point_this = kf_output.x_.offset_R_L_I * point_this + kf_output.x_.offset_T_L_I;
                     }
                     else
@@ -1049,19 +1095,22 @@ int main(int argc, char** argv)
                 }
                 else    // avia.yaml 直接执行此处
                 {
+                    // 使用Lidar_R_wrt_IMU和Lidar_T_wrt_IMU对其进行变换
                     point_this = Lidar_R_wrt_IMU * point_this + Lidar_T_wrt_IMU;    // 将雷达系下的点转到imu系下
                 }
                 M3D point_crossmat;
+                // 根据imu系下的点生成反对称矩阵
                 point_crossmat << SKEW_SYM_MATRX(point_this);   // 将点的坐标变为反对称矩阵
-                crossmat_list[i]=point_crossmat;            // 反对称矩阵存入crossmat_list中
+                crossmat_list[i]=point_crossmat;            // imu系下的点生成的反对称矩阵存入crossmat_list中
             }
             
             if (!use_imu_as_input)  // use_imu_as_input 默认为true
             {     
-                // bool imu_upda_cov = false;
+                // bool imu_upda_cov = false;   // 是否需要更新imu的协方差
                 effct_feat_num = 0;
                 /**** point by point update ****/
 
+                // 首先设置pcl_beg_time为Measures.lidar_beg_time，idx为-1
                 double pcl_beg_time = Measures.lidar_beg_time;
                 idx = -1;
                 for (k = 0; k < time_seq.size(); k++)
@@ -1072,6 +1121,7 @@ int main(int argc, char** argv)
 
                     if (is_first_frame) // 如果是第一帧雷达扫描
                     {
+                        //如果是第一帧，且启用了IMU，那么需要找到最近的IMU数据
                         if(imu_en)  // imu_en默认设置为true
                         {
                             // imu_next 存的是最后一帧IMU数据
@@ -1084,6 +1134,7 @@ int main(int argc, char** argv)
                                 // imu_deque.pop();
                             }
 
+                            //计算出对应的角速度和加速度
                             angvel_avr<<imu_last.angular_velocity.x, imu_last.angular_velocity.y, imu_last.angular_velocity.z;
                             acc_avr   <<imu_last.linear_acceleration.x, imu_last.linear_acceleration.y, imu_last.linear_acceleration.z;
                         }
@@ -1095,22 +1146,28 @@ int main(int argc, char** argv)
                     if(imu_en)  // imu_en默认设置为true
                     {
                         bool imu_comes = time_current > imu_next.header.stamp.toSec();
+                        // 如果启用了IMU，那么需要在当前时间之前的IMU数据都进行卡尔曼滤波更新
                         while (imu_comes)
                         {
                             // imu_upda_cov = true;
+                            // 将IMU数据中的角速度和线性加速度分别存储到angvel_avr和acc_avr中
                             angvel_avr<<imu_next.angular_velocity.x, imu_next.angular_velocity.y, imu_next.angular_velocity.z;
                             acc_avr   <<imu_next.linear_acceleration.x, imu_next.linear_acceleration.y, imu_next.linear_acceleration.z;
 
                             /*** covariance update ***/
-                            imu_last = imu_next;
-                            imu_next = *(imu_deque.front());
+                            /*** 对协方差进行更新 ***/
+                            imu_last = imu_next;    //将当前IMU数据存储为imu_last
+                            imu_next = *(imu_deque.front());    //将下一个IMU数据存储为imu_next
                             imu_deque.pop_front();
+                            //接着计算时间差dt
                             double dt = imu_last.header.stamp.toSec() - time_predict_last_const;
-                                kf_output.predict(dt, Q_output, input_in, true, false);
+                            //通过kf_output.predict函数进行预测
+                            kf_output.predict(dt, Q_output, input_in, true, false);
                             time_predict_last_const = imu_last.header.stamp.toSec(); // big problem
                             imu_comes = time_current > imu_next.header.stamp.toSec();
                             // if (!imu_comes)
                             {
+                                //就计算时间差dt_cov
                                 double dt_cov = imu_last.header.stamp.toSec() - time_update_last; 
 
                                 if (dt_cov > 0.0)
@@ -1118,10 +1175,12 @@ int main(int argc, char** argv)
                                     time_update_last = imu_last.header.stamp.toSec();
                                     double propag_imu_start = omp_get_wtime();
 
+                                    // 卡尔曼滤波预测
                                     kf_output.predict(dt_cov, Q_output, input_in, false, true);
 
                                     propag_time += omp_get_wtime() - propag_imu_start;
                                     double solve_imu_start = omp_get_wtime();
+                                    //进行eskf迭代更新
                                     kf_output.update_iterated_dyn_share_IMU();
                                     solve_time += omp_get_wtime() - solve_imu_start;
                                 }
@@ -1208,23 +1267,25 @@ int main(int argc, char** argv)
             }
             else    // 直接到这里执行
             {
-                bool imu_prop_cov = false;
+                bool imu_prop_cov = false;  //是否需要更新imu的协方差
                 effct_feat_num = 0;
 
+                // 首先设置pcl_beg_time为Measures.lidar_beg_time，idx为-1
                 double pcl_beg_time = Measures.lidar_beg_time;
                 idx = -1;
                 for (k = 0; k < time_seq.size(); k++)
                 {
                     PointType &point_body  = feats_down_body->points[idx+time_seq[k]];
-                    time_current = point_body.curvature / 1000.0 + pcl_beg_time;    // 计算雷达点的时刻，毫秒除1000变为纳秒，雷达开始时刻的时间戳单位为纳秒ns
+                    // 找到对应的点并计算出当前时间time_current
+                    // 计算当前雷达点的时刻，毫秒除1000变为纳秒，雷达开始时刻的时间戳单位为纳秒ns
+                    time_current = point_body.curvature / 1000.0 + pcl_beg_time;
                     if (is_first_frame)     // 如果是第一帧雷达扫描
                     {
                         while (time_current > imu_next.header.stamp.toSec()) 
                         {
-                            // imu_next 存的是最后一帧IMU数据
                             // 将IMU数据出队，直到雷达开始时刻在IMU时间戳之前
-                            imu_last = imu_next;
-                            imu_next = *(imu_deque.front());    // imu_last记录最后一帧IMU的上一个IMU数据
+                            imu_last = imu_next;    // imu_last记录最后一帧IMU的上一个IMU数据
+                            imu_next = *(imu_deque.front());    // imu_next 存的是队列中最前面的一帧IMU数据，也就是取出来的最后一帧IMU数据
                             imu_deque.pop_front();
                             // imu_deque.pop();
                         }
@@ -1232,8 +1293,8 @@ int main(int argc, char** argv)
                         // imu_upda_cov = true;
 
                         is_first_frame = false;
-                        t_last = time_current;
-                        time_update_last = time_current; 
+                        t_last = time_current;  // 记录第一个雷达点的时间
+                        time_update_last = time_current; // 记录第一个雷达点的时间
                         // if(prop_at_freq_of_imu)
                         {
                             input_in.gyro<<imu_last.angular_velocity.x,
@@ -1255,12 +1316,16 @@ int main(int argc, char** argv)
                             input_in.acc = input_in.acc * G_m_s2 / acc_norm;    // 将加速度换算成 m/s^2 的单位
                         }
                     }
-                    
+
+                    // 当前雷达点的时间大于最新IMU(当前IMU的下一个IMU数据)的时间时
+                    // IMU就一直出队并更新系统状态，直到IMU时间晚于当前雷达点时间戳
                     while (time_current > imu_next.header.stamp.toSec()) // && !imu_deque.empty())
                     {
-                        imu_last = imu_next;
-                        imu_next = *(imu_deque.front());
+                        // IMU出队，保证IMU的时间戳在当前雷达点之后，并作为 input_in 的加速度和角速度的输入
+                        imu_last = imu_next;    // 将当前IMU数据存储为imu_last
+                        imu_next = *(imu_deque.front());     // 将下一个IMU数据存储为imu_next
                         imu_deque.pop_front();
+                        // 将当前IMU数据赋值给输入input_in
                         input_in.gyro<<imu_last.angular_velocity.x, imu_last.angular_velocity.y, imu_last.angular_velocity.z;
                         input_in.acc <<imu_last.linear_acceleration.x, imu_last.linear_acceleration.y, imu_last.linear_acceleration.z; 
 
@@ -1271,28 +1336,37 @@ int main(int argc, char** argv)
                         // acc_avr   <<0.5 * (imu_last.linear_acceleration.x + imu_next.linear_acceleration.x),
                         //             0.5 * (imu_last.linear_acceleration.y + imu_next.linear_acceleration.y),
                         //             0.5 * (imu_last.linear_acceleration.z + imu_next.linear_acceleration.z);
-                        input_in.acc    = input_in.acc * G_m_s2 / acc_norm; 
+                        input_in.acc    = input_in.acc * G_m_s2 / acc_norm;
+                        // 如果是第一个的雷达点进来，dt = 当前IMU的时间戳 - 第一个雷达点的时间戳
+                        // 后续就表示 dt = 当前IMU的时间戳 - 上一个IMU的时间戳
                         double dt = imu_last.header.stamp.toSec() - t_last;
 
                         // if(!prop_at_freq_of_imu)
-                        // {       
+                        // {
+                        // 如果是第一个的雷达点进来，dt_cov = 当前IMU时间戳 - 第一个雷达点的时间戳
+                        // 后续就表示 dt = 当前IMU的时间戳 - 上一个IMU的时间戳
                         double dt_cov = imu_last.header.stamp.toSec() - time_update_last;
                         if (dt_cov > 0.0)
                         {
+                            // dt_cov表示时间差，Q_input表示输入的协方差矩阵，input_in表示输入，输入的是当前IMU的加速度和角速度
+                            // 这里只更新协方差，不更新状态
                             kf_input.predict(dt_cov, Q_input, input_in, false, true); 
                             time_update_last = imu_last.header.stamp.toSec(); //time_current;
                         }
-                            kf_input.predict(dt, Q_input, input_in, true, false); 
+                        // 这里只更新状态，不更新状态协方差
+                        kf_input.predict(dt, Q_input, input_in, true, false);
                         t_last = imu_last.header.stamp.toSec();
                         imu_prop_cov = true;
                         // imu_upda_cov = true;
-                    }      
+                    }
 
+                    // dt = 当前雷达点时间 - 上一个雷达点时间
+                    // 如果是初始帧，dt就为0
                     double dt = time_current - t_last;
                     t_last = time_current;
                     double propag_start = omp_get_wtime();
                     
-                    if(!prop_at_freq_of_imu)
+                    if(!prop_at_freq_of_imu)    // prop_at_freq_of_imu 默认为true
                     {   
                         double dt_cov = time_current - time_update_last;
                         if (dt_cov > 0.0)
@@ -1301,7 +1375,8 @@ int main(int argc, char** argv)
                             time_update_last = time_current; 
                         }
                     }
-                        kf_input.predict(dt, Q_input, input_in, true, false); 
+                    // 这里只更新状态，不更新状态协方差
+                    kf_input.predict(dt, Q_input, input_in, true, false);
 
                     propag_time += omp_get_wtime() - propag_start;
 
@@ -1368,7 +1443,9 @@ int main(int argc, char** argv)
             }
 
             /******* Publish odometry downsample *******/
-            if (!publish_odometry_without_downsample)   // 开关高频里程计，配置文件中设为 true 则打开高频里程计
+            // 开关高频里程计，配置文件中设为 true 则打开高频里程计
+            // 开启高频里程计后不执行这里
+            if (!publish_odometry_without_downsample)
             {
                 publish_odometry(pubOdomAftMapped);
             }
@@ -1378,16 +1455,21 @@ int main(int argc, char** argv)
             
             if(feats_down_size > 4)
             {
+                /*** 向映射ikdtree添加特性点 ***/
                 map_incremental();
             }
 
             t5 = omp_get_wtime();
             /******* Publish points *******/
+            /******* 发布轨迹和点 *******/
             if (path_en)                         publish_path(pubPath);
+            // 发布当前正在扫描的点云的topic 或者 保存点云为PCD文件
             if (scan_pub_en || pcd_save_en)      publish_frame_world(pubLaserCloudFullRes);
+            // 发布经过运动畸变校正注册到IMU坐标系的点云的topic
             if (scan_pub_en && scan_body_pub_en) publish_frame_body(pubLaserCloudFullRes_body);
             
             /*** Debug variables Logging ***/
+            /*** Debug 参数 ***/
             if (runtime_pos_log)
             {
                 frame_num ++;
@@ -1428,6 +1510,7 @@ int main(int argc, char** argv)
     //--------------------------save map-----------------------------------
     /* 1. make sure you have enough memories
     /* 2. noted that pcd save will influence the real-time performences **/
+    // pcd_save_interval 默认是 -1，即表示保存整张点云地图，不分割
     if (pcl_wait_save->size() > 0 && pcd_save_en)
     {
         string file_name = string("scans.pcd");

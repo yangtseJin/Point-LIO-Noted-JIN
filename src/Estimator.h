@@ -13,11 +13,11 @@
 
 extern PointCloudXYZI::Ptr normvec; //(new PointCloudXYZI(100000, 1));
 extern std::vector<int> time_seq;
-extern PointCloudXYZI::Ptr feats_down_body; //(new PointCloudXYZI());
-extern PointCloudXYZI::Ptr feats_down_world; //(new PointCloudXYZI());
+extern PointCloudXYZI::Ptr feats_down_body; //(new PointCloudXYZI());   // 畸变纠正后降采样的单帧点云，lidar系
+extern PointCloudXYZI::Ptr feats_down_world; //(new PointCloudXYZI());  // 畸变纠正后降采样的单帧点云，w系
 extern std::vector<V3D> pbody_list;
 extern std::vector<PointVector> Nearest_Points; 
-extern KD_TREE<PointType> ikdtree;
+extern KD_TREE<PointType> ikdtree;  // ikd-tree类
 extern std::vector<float> pointSearchSqDis;
 extern bool point_selected_surf[100000]; // = {0};
 extern std::vector<M3D> crossmat_list;
@@ -79,8 +79,8 @@ MTK_BUILD_MANIFOLD(process_noise_output,
 ((vect3, nba))
 );
 
-extern esekfom::esekf<state_input, 24, input_ikfom> kf_input;
-extern esekfom::esekf<state_output, 30, input_ikfom> kf_output;
+extern esekfom::esekf<state_input, 24, input_ikfom> kf_input;       // EKF的输入，针对IMU优化
+extern esekfom::esekf<state_output, 30, input_ikfom> kf_output;     // EKF的输出，针对单点激光雷达
 extern state_input state_in;
 extern state_output state_out;
 extern input_ikfom input_in;

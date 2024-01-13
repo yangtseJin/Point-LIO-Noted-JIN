@@ -87,17 +87,19 @@ std::vector<int> time_compressing(const PointCloudXYZI::Ptr &point_cloud)
   for(int i = 0; i < points_size - 1; i++)
   {
     j++;
+    // 如果后一个点的时间大于前一个点，将j装入times_seq中，同时j置为0
     if (point_cloud->points[i+1].curvature > point_cloud->points[i].curvature)
     {
+      // 如果点的顺序正确的话，即所有的点都是按时间从小到大排列，time_seq中应该全是1
       time_seq.emplace_back(j);
       j = 0;
     }
   }
-  if (j == 0)
+  if (j == 0)   // 如果循环结束，对于最后一个点，j = 0表示最后一个点的时间戳大于倒数第二个点，将 time_seq 置为1
   {
     time_seq.emplace_back(1);
   }
-  else
+  else  // 如果循环结束，对于最后一个点，j != 0 表示最后一个点的时间戳小于等于倒数第二个点，将 time_seq 置为 j+1
   {
     time_seq.emplace_back(j+1);
   }
@@ -139,32 +141,38 @@ bool esti_normvector(Matrix<T, 3, 1> &normvec, const PointVector &point, const T
     return true;
 }
 
+//按照点集计算平面方程
 template<typename T>
 bool esti_plane(Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &threshold)
 {
-    Matrix<T, NUM_MATCH_POINTS, 3> A;
-    Matrix<T, NUM_MATCH_POINTS, 1> b;
+    // 平面方程为 ax+by+cz+d=0，待求解的方程为 A * (a/d , b/d, c/d)^T = -1
+    Matrix<T, NUM_MATCH_POINTS, 3> A;   //点集的矩阵
+    Matrix<T, NUM_MATCH_POINTS, 1> b;   //点集的值
     A.setZero();
     b.setOnes();
     b *= -1.0f;
 
-    for (int j = 0; j < NUM_MATCH_POINTS; j++)
+    for (int j = 0; j < NUM_MATCH_POINTS; j++)  //将点集的值和矩阵放入A和b中
     {
         A(j,0) = point[j].x;
         A(j,1) = point[j].y;
         A(j,2) = point[j].z;
     }
 
+    // 求解点集的平面方程的法向量
     Matrix<T, 3, 1> normvec = A.colPivHouseholderQr().solve(b);
 
-    T n = normvec.norm();
-    pca_result(0) = normvec(0) / n;
+    T n = normvec.norm();   // 点集的平面方程的法向量的模
+    pca_result(0) = normvec(0) / n; // 点集的平面方程法向量的单位向量
     pca_result(1) = normvec(1) / n;
     pca_result(2) = normvec(2) / n;
     pca_result(3) = 1.0 / n;
+    // 此时的平面方程变为：1/n * (a/d * x+ b/d * y + c/d * z + 1) = 0
+    // 其中 n 为 (a/d , b/d, c/d)^T 的模长
 
     for (int j = 0; j < NUM_MATCH_POINTS; j++)
     {
+        // 求解点集的平面方程的法向量与点集的值的积大于阈值，则代表点集不符合平面方程
         if (fabs(pca_result(0) * point[j].x + pca_result(1) * point[j].y + pca_result(2) * point[j].z + pca_result(3)) > threshold)
         {
             return false;

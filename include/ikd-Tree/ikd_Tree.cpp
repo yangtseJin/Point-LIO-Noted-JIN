@@ -474,64 +474,85 @@ void KD_TREE<PointType>::Radius_Search(PointType point, const float radius, Poin
     Search_by_radius(Root_Node, point, radius, Storage);
 }
 
+// 向树中插入新的点集
 template <typename PointType>
 int KD_TREE<PointType>::Add_Points(PointVector &PointToAdd, bool downsample_on)
 {
+    // 需要插入的点的个数
     int NewPointSize = PointToAdd.size();
+    // 树的节点个数
     int tree_size = size();
     BoxPointType Box_of_Point;
     PointType downsample_result, mid_point;
+    // 根据输入参数判断是否需要进行降采样
     bool downsample_switch = downsample_on && DOWNSAMPLE_SWITCH;
     float min_dist, tmp_dist;
     int tmp_counter = 0;
+    // 遍历点集
     for (int i = 0; i < PointToAdd.size(); i++)
     {
+        // 判断是否需要降采样
         if (downsample_switch)
         {
+            // 计算该点所属的体素
             Box_of_Point.vertex_min[0] = floor(PointToAdd[i].x / downsample_size) * downsample_size;
             Box_of_Point.vertex_max[0] = Box_of_Point.vertex_min[0] + downsample_size;
             Box_of_Point.vertex_min[1] = floor(PointToAdd[i].y / downsample_size) * downsample_size;
             Box_of_Point.vertex_max[1] = Box_of_Point.vertex_min[1] + downsample_size;
             Box_of_Point.vertex_min[2] = floor(PointToAdd[i].z / downsample_size) * downsample_size;
             Box_of_Point.vertex_max[2] = Box_of_Point.vertex_min[2] + downsample_size;
+            // 计算该体素的中心点坐标
             mid_point.x = Box_of_Point.vertex_min[0] + (Box_of_Point.vertex_max[0] - Box_of_Point.vertex_min[0]) / 2.0;
             mid_point.y = Box_of_Point.vertex_min[1] + (Box_of_Point.vertex_max[1] - Box_of_Point.vertex_min[1]) / 2.0;
             mid_point.z = Box_of_Point.vertex_min[2] + (Box_of_Point.vertex_max[2] - Box_of_Point.vertex_min[2]) / 2.0;
+            // 清空降采样缓存
             PointVector().swap(Downsample_Storage);
+            // 在树中搜索最近邻点，且要求点都在Box中，将点存于Downsample_Storage
             Search_by_range(Root_Node, Box_of_Point, Downsample_Storage);
+            // 计算当前点于体素中心的距离
             min_dist = calc_dist(PointToAdd[i], mid_point);
             downsample_result = PointToAdd[i];
+            // 遍历体素内的所有点,寻找近邻点中最接近体素中心的点
             for (int index = 0; index < Downsample_Storage.size(); index++)
             {
+                // 计算当前近邻点与体素中心的距离
                 tmp_dist = calc_dist(Downsample_Storage[index], mid_point);
+                // 比较两个距离，判断是否需要添加该点
                 if (tmp_dist < min_dist)
                 {
                     min_dist = tmp_dist;
                     downsample_result = Downsample_Storage[index];
                 }
             }
+            // 如果不需要重建树
             if (Rebuild_Ptr == nullptr || *Rebuild_Ptr != Root_Node)
             {
+                // 如果近邻点不止1个，或者当前点与原有的点很接近
                 if (Downsample_Storage.size() > 1 || same_point(PointToAdd[i], downsample_result))
                 {
+                    // 删除体素内的原有点，然后插入当前点
                     if (Downsample_Storage.size() > 0)
                         Delete_by_range(&Root_Node, Box_of_Point, true, true);
                     Add_by_point(&Root_Node, downsample_result, true, Root_Node->division_axis);
                     tmp_counter++;
                 }
             }
-            else
+            else    // 需要重建树
             {
                 if (Downsample_Storage.size() > 1 || same_point(PointToAdd[i], downsample_result))
                 {
                     Operation_Logger_Type operation_delete, operation;
+                    // 记录待删除的点
                     operation_delete.boxpoint = Box_of_Point;
+                    // 记录待插入的新点
                     operation_delete.op = DOWNSAMPLE_DELETE;
                     operation.point = downsample_result;
                     operation.op = ADD_POINT;
                     pthread_mutex_lock(&working_flag_mutex);
+                    // 删除体素内的点
                     if (Downsample_Storage.size() > 0)
                         Delete_by_range(&Root_Node, Box_of_Point, false, true);
+                    // 添加点
                     Add_by_point(&Root_Node, downsample_result, false, Root_Node->division_axis);
                     tmp_counter++;
                     if (rebuild_flag)
@@ -546,7 +567,7 @@ int KD_TREE<PointType>::Add_Points(PointVector &PointToAdd, bool downsample_on)
                 };
             }
         }
-        else
+        else    // 不需要降采样
         {
             if (Rebuild_Ptr == nullptr || *Rebuild_Ptr != Root_Node)
             {
