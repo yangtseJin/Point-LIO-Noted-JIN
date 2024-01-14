@@ -112,21 +112,30 @@ Eigen::Matrix<double, 30, 1> get_f_output(state_output &s, const input_ikfom &in
 	return res;
 }
 
+// 注意该矩阵没乘dt，没加单位阵
+// 这里实际上参考对应fast_lio论文公式(7)，因为df_dx_input中state_input的变量和Point-LIO 论文公式(11)的变量对不上
 Eigen::Matrix<double, 24, 24> df_dx_input(state_input &s, const input_ikfom &in)
 {
-	Eigen::Matrix<double, 24, 24> cov = Eigen::Matrix<double, 24, 24>::Zero();
+    // 当中的24个对应了status的维度计算，为 pos(3), rot(3),offset_R_L_I(3),offset_T_L_I(3), vel(3), bg(3), ba(3), grav(3);
+    // 状态量的顺序和论文中不同，要注意，论文中的顺序为 R, p, v ,bg, ba, g, omega, acc
+    Eigen::Matrix<double, 24, 24> cov = Eigen::Matrix<double, 24, 24>::Zero();
+    //一开始是一个R3的单位阵，代表速度转移
+    // 对应 Point-LIO 论文公式(11)的Fx 第2行第3列，或者说fast_lio论文公式(7)第2行第3列
 	cov.template block<3, 3>(0, 12) = Eigen::Matrix3d::Identity();
 	vect3 acc_;
-	in.acc.boxminus(acc_, s.ba);
+	in.acc.boxminus(acc_, s.ba);     //测量加速度 = a_m - bias
 	vect3 omega;
-	in.gyro.boxminus(omega, s.bg);
-	cov.template block<3, 3>(12, 3) = -s.rot*MTK::hat(acc_);
-	cov.template block<3, 3>(12, 18) = -s.rot;
+	in.gyro.boxminus(omega, s.bg);  //拿到角速度
+	cov.template block<3, 3>(12, 3) = -s.rot*MTK::hat(acc_);    //fast_lio论文公式(7)第3行第1列
+    // 将角度转到存入的矩阵中
+	cov.template block<3, 3>(12, 18) = -s.rot;  //fast_lio论文公式(7)第3行第5列
 	// Eigen::Matrix<state_ikfom::scalar, 2, 1> vec = Eigen::Matrix<state_ikfom::scalar, 2, 1>::Zero();
 	// Eigen::Matrix<state_ikfom::scalar, 3, 2> grav_matrix;
 	// s.S2_Mx(grav_matrix, vec, 21);
-	cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity(); // grav_matrix; 
-	cov.template block<3, 3>(3, 15) = -Eigen::Matrix3d::Identity(); 
+    //对应fast_lio论文公式(7)第3行第6列
+	cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity(); // grav_matrix;
+    //对应fast_lio论文公式(7)第1行第4列 (简化为-I)
+	cov.template block<3, 3>(3, 15) = -Eigen::Matrix3d::Identity();
 	return cov;
 }
 
@@ -140,17 +149,24 @@ Eigen::Matrix<double, 24, 24> df_dx_input(state_input &s, const input_ikfom &in)
 // 	return cov;
 // }
 
+// 对应 Point-LIO 论文公式(11)的Fx
+// 注意该矩阵没乘dt，没加单位阵
 Eigen::Matrix<double, 30, 30> df_dx_output(state_output &s, const input_ikfom &in)
 {
+    // 当中的30个对应了status的维度计算，为 pos(3), rot(3), offset_R_L_I(3), offset_T_L_I(3), vel(3), ome(3), acc(3), grav(3), bg(3), ba(3);
+    // 状态量的顺序和论文中不同，要注意，论文中的顺序为 R, p, v ,bg, ba, g, omega, acc
 	Eigen::Matrix<double, 30, 30> cov = Eigen::Matrix<double, 30, 30>::Zero();
-	cov.template block<3, 3>(0, 12) = Eigen::Matrix3d::Identity();
-	cov.template block<3, 3>(12, 3) = -s.rot*MTK::hat(s.acc);
-	cov.template block<3, 3>(12, 18) = s.rot;
+    // cov 矩阵中第0行和位移有关，对应论文中第2行
+	cov.template block<3, 3>(0, 12) = Eigen::Matrix3d::Identity();  // 对应 Point-LIO 论文公式(11)Fx 第2行第3列
+    // cov 矩阵中第12行和速度有关，对应论文中第3行
+	cov.template block<3, 3>(12, 3) = -s.rot*MTK::hat(s.acc);   // 对应 Point-LIO 论文公式(11)Fx的第3行1列，即 F31
+	cov.template block<3, 3>(12, 18) = s.rot;   // 对应 Point-LIO 论文公式(11)Fx的第3行8列，即 F38
 	// Eigen::Matrix<state_ikfom::scalar, 2, 1> vec = Eigen::Matrix<state_ikfom::scalar, 2, 1>::Zero();
 	// Eigen::Matrix<state_ikfom::scalar, 3, 2> grav_matrix;
 	// s.S2_Mx(grav_matrix, vec, 21);
-	cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity(); // grav_matrix; 
-	cov.template block<3, 3>(3, 15) = Eigen::Matrix3d::Identity(); 
+	cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity(); // grav_matrix; // 对应 Point-LIO 论文公式(11)Fx的第3行6列
+    // cov 矩阵中第3行和旋转有关，对应论文中第1行
+	cov.template block<3, 3>(3, 15) = Eigen::Matrix3d::Identity(); // 对应 Point-LIO 论文公式(11)Fx的第1行7列
 	return cov;
 }
 
