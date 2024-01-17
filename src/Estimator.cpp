@@ -455,6 +455,7 @@ void h_model_output(state_output &s, esekfom::dyn_share_modified<double> &ekfom_
 	effct_feat_num += effect_num_k;
 }
 
+// 计算IMU的残差
 void h_model_IMU_output(state_output &s, esekfom::dyn_share_modified<double> &ekfom_data)
 {
     std::memset(ekfom_data.satu_check, false, 6);
@@ -520,7 +521,7 @@ void pointBodyToWorld(PointType const * const pi, PointType * const po)
 	}
 	else
 	{
-		if (!use_imu_as_input)
+		if (!use_imu_as_input)  // use_imu_as_input 在 launch 文件中默认为 false
 		{
 			p_global = kf_output.x_.rot * (Lidar_R_wrt_IMU * p_body + Lidar_T_wrt_IMU) + kf_output.x_.pos;
 		}

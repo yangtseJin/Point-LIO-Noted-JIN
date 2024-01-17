@@ -136,7 +136,7 @@ void pointBodyLidarToIMU(PointType const * const pi, PointType * const po)
     V3D p_body_imu;
     if (extrinsic_est_en)
     {
-        if (!use_imu_as_input)
+        if (!use_imu_as_input)  // use_imu_as_input 在 launch 文件中默认为 false
         {
             p_body_imu = kf_output.x_.offset_R_L_I * p_body_lidar + kf_output.x_.offset_T_L_I;
         }
@@ -175,7 +175,7 @@ void lasermap_fov_segment() // 针对激光雷达视场角来完成图像分割
     cub_needrm.shrink_to_fit(); // 释放需要移除的区域的内存，不会改变 vector 中的元素数量，只会影响其内部的容量
 
     V3D pos_LiD;
-    if (use_imu_as_input)   // use_imu_as_input 默认为true
+    if (use_imu_as_input)   // use_imu_as_input 在 launch 文件中默认为 false
     {
         // 计算激光雷达在当前位姿下的位置
         // 雷达在W系下位置，式子的意义是 W^p_L = W^p_I + W^R_I * I^t_L
@@ -722,7 +722,7 @@ void publish_frame_body(const ros::Publisher & pubLaserCloudFull_body)
 template<typename T>
 void set_posestamp(T & out)
 {
-    if (!use_imu_as_input)
+    if (!use_imu_as_input)  // use_imu_as_input 在 launch 文件中默认为 false
     {
         out.position.x = kf_output.x_.pos(0);
         out.position.y = kf_output.x_.pos(1);
@@ -733,7 +733,7 @@ void set_posestamp(T & out)
         out.orientation.z = q.coeffs()[2];
         out.orientation.w = q.coeffs()[3];
     }
-    else    // use_imu_as_input 默认是1 ，执行这里的else
+    else    // use_imu_as_input 默认是0 ，不执行这里
     {
         out.position.x = kf_input.x_.pos(0);
         out.position.y = kf_input.x_.pos(1);
@@ -743,6 +743,64 @@ void set_posestamp(T & out)
         out.orientation.y = q.coeffs()[1];
         out.orientation.z = q.coeffs()[2];
         out.orientation.w = q.coeffs()[3];
+    }
+}
+
+// 输出线速度的函数
+template<typename T>
+void set_posestamp_vel(T & out)
+{
+    if (!use_imu_as_input)  // use_imu_as_input 在 launch 文件中默认为 false
+    {
+        out.pose.pose.position.x = kf_output.x_.pos(0);
+        out.pose.pose.position.y = kf_output.x_.pos(1);
+        out.pose.pose.position.z = kf_output.x_.pos(2);
+        Eigen::Quaterniond q(kf_output.x_.rot);
+        out.pose.pose.orientation.x = q.coeffs()[0];
+        out.pose.pose.orientation.y = q.coeffs()[1];
+        out.pose.pose.orientation.z = q.coeffs()[2];
+        out.pose.pose.orientation.w = q.coeffs()[3];
+
+        // code by JIN
+        /* ******* begin *********** */
+        // 输出线速度
+        // 状态量中计算得到的线速度
+        out.twist.twist.linear.x = kf_output.x_.vel(0);
+        out.twist.twist.linear.y = kf_output.x_.vel(1);
+        out.twist.twist.linear.z = kf_output.x_.vel(2);
+        std::cout<<"linear velocity = "<< kf_output.x_.vel <<std::endl;
+
+        // 状态量中计算得到的角速度
+        out.twist.twist.angular.x = kf_output.x_.omg(0);
+        out.twist.twist.angular.y = kf_output.x_.omg(1);
+        out.twist.twist.angular.z = kf_output.x_.omg(2);
+        std::cout<<"angular velocity = "<< kf_output.x_.omg <<std::endl;
+
+        std::cout<<"odometry 使用的是 kf_output"<<std::endl;
+
+        /* ******* end *********** */
+    }
+    else    // use_imu_as_input 默认是0 ，不执行这里
+    {
+        out.pose.pose.position.x = kf_input.x_.pos(0);
+        out.pose.pose.position.y = kf_input.x_.pos(1);
+        out.pose.pose.position.z = kf_input.x_.pos(2);
+        Eigen::Quaterniond q(kf_input.x_.rot);
+        out.pose.pose.orientation.x = q.coeffs()[0];
+        out.pose.pose.orientation.y = q.coeffs()[1];
+        out.pose.pose.orientation.z = q.coeffs()[2];
+        out.pose.pose.orientation.w = q.coeffs()[3];
+
+        // code by JIN
+        /* ******* begin *********** */
+        // 输出线速度
+        // 状态量中计算得到的线速度
+        out.twist.twist.linear.x = kf_input.x_.vel(0);
+        out.twist.twist.linear.y = kf_input.x_.vel(1);
+        out.twist.twist.linear.z = kf_input.x_.vel(2);
+//        std::cout<<"odometry 使用的是 kf_input"<<std::endl;
+
+        /* ******* end *********** */
     }
 }
 
@@ -758,8 +816,9 @@ void publish_odometry(const ros::Publisher & pubOdomAftMapped)
     {
         odomAftMapped.header.stamp = ros::Time().fromSec(lidar_end_time);
     }
-    set_posestamp(odomAftMapped.pose.pose);
-    
+//    set_posestamp(odomAftMapped.pose.pose);
+    set_posestamp_vel(odomAftMapped);
+
     pubOdomAftMapped.publish(odomAftMapped);
 
     static tf::TransformBroadcaster br;
@@ -854,6 +913,7 @@ int main(int argc, char** argv)
     Eigen::Matrix<double, 24, 24> Q_input = process_noise_cov_input();      // 输入的协方差矩阵
     Eigen::Matrix<double, 30, 30> Q_output = process_noise_cov_output();    // 输出的协方差矩阵
     /*** debug record ***/
+    // 将调试log输出到文件中
     FILE *fp;
     string pos_log_dir = root_dir + "/Log/pos_log.txt";
     fp = fopen(pos_log_dir.c_str(),"w");
@@ -867,20 +927,27 @@ int main(int argc, char** argv)
         cout << "~~~~"<<ROOT_DIR<<" doesn't exist" << endl;
 
     /*** ROS subscribe initialization ***/
+    // ROS订阅器和发布器的定义和初始化
+    // 雷达点云的订阅器sub_pcl，订阅点云的topic
     ros::Subscriber sub_pcl = p_pre->lidar_type == AVIA ? \
         nh.subscribe(lid_topic, 200000, livox_pcl_cbk) : \
         nh.subscribe(lid_topic, 200000, standard_pcl_cbk);
+    // IMU的订阅器sub_imu，订阅IMU的topic
     ros::Subscriber sub_imu = nh.subscribe(imu_topic, 200000, imu_cbk);
+    // 发布当前正在扫描的点云，topic名字为/cloud_registered
     ros::Publisher pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>
             ("/cloud_registered", 100000);
+    // 发布经过运动畸变校正到IMU坐标系的点云，topic名字为/cloud_registered_body
     ros::Publisher pubLaserCloudFullRes_body = nh.advertise<sensor_msgs::PointCloud2>
             ("/cloud_registered_body", 100000);
     ros::Publisher pubLaserCloudEffect  = nh.advertise<sensor_msgs::PointCloud2>
             ("/cloud_effected", 100000);
     ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>
             ("/Laser_map", 100000);
+    // 发布当前里程计信息，topic名字为/aft_mapped_to_init
     ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry> 
             ("/aft_mapped_to_init", 100000);
+    // 发布里程计总的路径，topic名字为/path
     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 100000);
     ros::Publisher plane_pub = nh.advertise<visualization_msgs::Marker>

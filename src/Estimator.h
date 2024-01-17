@@ -35,6 +35,7 @@ typedef MTK::S2<double, 98090, 10000, 1> S2;
 typedef MTK::vect<1, double> vect1;
 typedef MTK::vect<2, double> vect2;
 
+// 定义 state_input 的ieskf状态空间，和FAST-LIO中状态量的一样
 MTK_BUILD_MANIFOLD(state_input,
 ((vect3, pos))
 ((SO3, rot))
@@ -46,6 +47,7 @@ MTK_BUILD_MANIFOLD(state_input,
 ((vect3, gravity))
 );
 
+// 定义的 state_output 的 ieskf状态空间，Point-LIO中定义的状态量，将加速度和角速度作为测量值看待而不是单纯的输入
 MTK_BUILD_MANIFOLD(state_output,
 ((vect3, pos))
 ((SO3, rot))
@@ -59,6 +61,7 @@ MTK_BUILD_MANIFOLD(state_output,
 ((vect3, ba))
 );
 
+// 定义的输入状态
 MTK_BUILD_MANIFOLD(input_ikfom,
 ((vect3, acc))
 ((vect3, gyro))
