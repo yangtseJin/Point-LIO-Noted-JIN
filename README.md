@@ -1,3 +1,11 @@
+## 说明
+这是本人修改过的学习版本，源代码来自 HKU Mars 实验室的[FAST-LIO2]()
+
+### 修改日志
+
+* 20230124 添加代码输出Odometry的线速度与角速度
+
+
 # Point-LIO
 ## 1. Introduction
 
