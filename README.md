@@ -1,9 +1,31 @@
 ## 说明
-这是本人修改过的学习版本，源代码来自 HKU Mars 实验室的[FAST-LIO2]()
 
-### 修改日志
+源代码来自 HKU Mars 实验室的[Point-LIO](https://github.com/hku-mars/Point-LIO)
 
-* 20230124 添加代码输出Odometry的线速度与角速度
+这是本人 YangtseJin 修改过的学习注释版本，给源代码添加了很多中文注释，包括公式说明等，Point-LIO源码直接上手理解有一定难度，有FAST-LIO的代码基础会更容易理解
+
+同时添加了输出线速度与角速度的代码，方便查看Odometry时分析数据
+
+如有兴趣，可关注本人CSDN主页 CSDN blog homepage：https://blog.csdn.net/qq_37648371
+
+如需转载或作其他用途，请遵守开源协议并注明出处！
+
+**如果这个项目对你有用，请点击一下 star！**
+
+This is modified version with comments. The source code comes from [Point-LIO](https://github.com/hku-mars/Point-LIO) of HKU Mars Laboratory.
+
+If using this code, please indicate the source and comply with the open source license!
+
+Created by YangtseJin
+
+project source code : https://github.com/yangtseJin/Point-LIO-Noted-JIN
+
+**If this project is useful for you, please star it!**
+
+### 修改日志 Log
+
+* 20240117 添加代码输出Odometry的线速度与角速度
+  Add code to output the linear velocity and angular velocity for `/Odometry`
 
 
 # Point-LIO
